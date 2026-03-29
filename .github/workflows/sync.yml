@@ -1,0 +1,69 @@
+name: Sync from PubMLST
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # every Monday at 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      scheme:
+        description: "Specific scheme to sync (leave blank for all)"
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests biopython
+
+      - name: Clone openmlst-client
+        run: git clone https://github.com/cgps-group/openmlst-client.git /tmp/openmlst-client
+
+      - name: Sync schemes
+        run: |
+          if [ -n "${{ github.event.inputs.scheme }}" ]; then
+            python3 /tmp/openmlst-client/scripts/seed_registry.py \
+              --scheme "${{ github.event.inputs.scheme }}" \
+              --registry-dir "$GITHUB_WORKSPACE" \
+              --updated-after "$(date -d '8 days ago' +%Y-%m-%d)"
+          else
+            for scheme in \
+              pubmlst_escherichia_seqdef \
+              pubmlst_saureus_seqdef \
+              pubmlst_salmonella_seqdef \
+              pubmlst_neisseria_seqdef \
+              pubmlst_spneumoniae_seqdef \
+              pubmlst_campylobacter_seqdef \
+              pubmlst_abaumannii_seqdef \
+              pubmlst_hinfluenzae_seqdef \
+              pubmlst_efaecium_seqdef \
+              pubmlst_efaecalis_seqdef; do
+              python3 /tmp/openmlst-client/scripts/seed_registry.py \
+                --scheme "$scheme" \
+                --registry-dir "$GITHUB_WORKSPACE" \
+                --updated-after "$(date -d '8 days ago' +%Y-%m-%d)" || true
+            done
+          fi
+
+      - name: Push if changed
+        run: |
+          git config user.name "openmlst-bot"
+          git config user.email "openmlst-bot@cgps.group"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "sync: PubMLST incremental update $(date +%Y-%m-%d)"
+            git push
+          else
+            echo "Nothing changed."
+          fi
